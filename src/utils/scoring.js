@@ -2,22 +2,79 @@ import { haversine } from './matching.js';
 
 /** Fleet driving consumption (kWh per 100 miles). */
 const KWH_PER_100_MILES = 25;
-/** Marginal $/kWh for energy used while driving to the station (not station L2/DC price). */
+/** Marginal $/kWh for energy used while driving to the station. */
 const DRIVE_ELECTRICITY_USD_PER_KWH = 0.2;
 
-export function scoreCharger(
+const KM_TO_MI = 0.621371;
+
+/**
+ * Driving route via OSRM (free, no API key). Returns miles and minutes.
+ */
+async function getOSRMDistance(lat1, lon1, lat2, lon2) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data.code === 'Ok' && data.routes?.[0]) {
+      const km = data.routes[0].distance / 1000;
+      const minutes = data.routes[0].duration / 60;
+      return {
+        distanceMiles: km * KM_TO_MI,
+        durationMinutes: minutes,
+      };
+    }
+    return null;
+  } catch (e) {
+    console.warn('OSRM failed:', e);
+    return null;
+  }
+}
+
+async function getDrivingMetrics(lat1, lon1, lat2, lon2) {
+  const osrm = await getOSRMDistance(lat1, lon1, lat2, lon2);
+  if (osrm) {
+    return { ...osrm, source: 'osrm' };
+  }
+  const miles = haversine(lat1, lon1, lat2, lon2);
+  return {
+    distanceMiles: miles,
+    durationMinutes: (miles / 10) * 60,
+    source: 'estimate',
+  };
+}
+
+export async function scoreCharger(
   charger,
   driverLat,
   driverLon,
   kwhNeeded,
   allChargers,
-  options = {} 
+  options = {}
 ) {
-  const { driveMinutes: driveMinutesOverride, driveTimeSource = 'estimate' } =
-    options;
-  const congestion = charger.node_congestion;
+  const { driveMinutes: driveMinutesOverride, driveTimeSource = 'estimate' } = options;
 
-  const allCong = allChargers.map((c) => c.node_congestion);
+  let distanceMiles;
+  let driveMinutes;
+  let resolvedDriveTimeSource;
+
+  if (driveMinutesOverride != null && driveMinutesOverride !== undefined) {
+    driveMinutes = driveMinutesOverride;
+    resolvedDriveTimeSource = driveTimeSource;
+    distanceMiles = (driveMinutes / 60) * 10;
+  } else {
+    const m = await getDrivingMetrics(
+      driverLat,
+      driverLon,
+      charger.lat,
+      charger.lon
+    );
+    distanceMiles = m.distanceMiles;
+    driveMinutes = m.durationMinutes;
+    resolvedDriveTimeSource = m.source;
+  }
+
+  const congestion = charger.node_congestion || 0;
+  const allCong = allChargers.map((c) => c.node_congestion || 0);
   const minCong = Math.min(...allCong);
   const maxCong = Math.max(...allCong);
   const range = Math.max(maxCong - minCong, 0.01);
@@ -35,16 +92,7 @@ export function scoreCharger(
       ? Math.min(25, (avgCong * kwhNeeded) / 1000 * 2.0)
       : 0;
 
-  const distance = haversine(driverLat, driverLon, charger.lat, charger.lon);
-  const driveMinutes =
-    driveMinutesOverride !== undefined && driveMinutesOverride !== null
-      ? driveMinutesOverride
-      : (distance / 10) * 60;
-  const resolvedDriveTimeSource =
-    driveMinutesOverride !== undefined && driveMinutesOverride !== null
-      ? driveTimeSource
-      : 'estimate';
-  const driveEnergyKwh = (distance / 100) * KWH_PER_100_MILES;
+  const driveEnergyKwh = (distanceMiles / 100) * KWH_PER_100_MILES;
   const timePenalty = driveEnergyKwh * DRIVE_ELECTRICITY_USD_PER_KWH;
 
   const chargingCost = kwhNeeded * charger.price_per_kwh;
@@ -59,7 +107,7 @@ export function scoreCharger(
     gridBonus: Math.round(gridBonus * 100) / 100,
     drActive,
     drBonus: Math.round(drBonus * 100) / 100,
-    distance: Math.round(distance * 100) / 100,
+    distance: Math.round(distanceMiles * 100) / 100,
     driveMinutes: Math.round(driveMinutes),
     driveTimeSource: resolvedDriveTimeSource,
     driveEnergyKwh: Math.round(driveEnergyKwh * 1000) / 1000,

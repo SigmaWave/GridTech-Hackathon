@@ -77,13 +77,13 @@ export default function App() {
   }, [scoredList]);
 
   const handleFindBest = useCallback(
-    (kwhNeeded) => {
+    async (kwhNeeded) => {
       if (!driverPosition) return;
       if (kwhNeeded <= 0 || !chargers.length) return;
 
       const [lat, lon] = driverPosition;
-      const scored = chargers.map((c) =>
-        scoreCharger(c, lat, lon, kwhNeeded, chargers)
+      const scored = await Promise.all(
+        chargers.map((c) => scoreCharger(c, lat, lon, kwhNeeded, chargers))
       );
 
       let best = scored[0];
