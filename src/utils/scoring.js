@@ -1,5 +1,10 @@
 import { haversine } from './matching.js';
 
+/** Fleet driving consumption (kWh per 100 miles). */
+const KWH_PER_100_MILES = 25;
+/** Marginal $/kWh for energy used while driving to the station (not station L2/DC price). */
+const DRIVE_ELECTRICITY_USD_PER_KWH = 0.2;
+
 export function scoreCharger(
   charger,
   driverLat,
@@ -21,7 +26,7 @@ export function scoreCharger(
     Math.min(100, ((congestion - minCong) / range) * 100)
   );
 
-  const gridBonus = Math.max(0, ((100 - gridStress) / 100) * 15);
+  const gridBonus = Math.max(0, ((100 - gridStress) / 100) * 4);
 
   const avgCong = allCong.reduce((a, b) => a + b, 0) / allCong.length;
   const drActive = avgCong > 10;
@@ -39,7 +44,8 @@ export function scoreCharger(
     driveMinutesOverride !== undefined && driveMinutesOverride !== null
       ? driveTimeSource
       : 'estimate';
-  const timePenalty = driveMinutes * 0.5;
+  const driveEnergyKwh = (distance / 100) * KWH_PER_100_MILES;
+  const timePenalty = driveEnergyKwh * DRIVE_ELECTRICITY_USD_PER_KWH;
 
   const chargingCost = kwhNeeded * charger.price_per_kwh;
 
@@ -56,6 +62,7 @@ export function scoreCharger(
     distance: Math.round(distance * 100) / 100,
     driveMinutes: Math.round(driveMinutes),
     driveTimeSource: resolvedDriveTimeSource,
+    driveEnergyKwh: Math.round(driveEnergyKwh * 1000) / 1000,
     timePenalty: Math.round(timePenalty * 100) / 100,
     chargingCost: Math.round(chargingCost * 100) / 100,
     totalEarnings: Math.round(totalEarnings * 100) / 100,
