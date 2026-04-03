@@ -77,16 +77,16 @@ function Column({ title, s }) {
       </dl>
 
       <div className="mt-4 border-t border-gray-200 pt-3 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-600">Charging cost</span>
-          <span className="tabular-nums font-medium text-gray-900">
+        <div className="flex justify-between text-black">
+          <span>Charging cost</span>
+          <span className="tabular-nums font-medium">
             ${s.chargingCost.toFixed(2)}
           </span>
         </div>
         <div className="flex justify-between text-[#1E8449]">
           <span>Grid bonus</span>
           <span className="tabular-nums font-medium">
-            +${s.gridBonus.toFixed(2)}
+            -${s.gridBonus.toFixed(2)}
           </span>
         </div>
         <div className="flex justify-between text-[#1E8449]">
@@ -95,10 +95,10 @@ function Column({ title, s }) {
             +${s.drBonus.toFixed(2)}
           </span>
         </div>
-        <div className="flex justify-between text-gray-500">
+        <div className="flex justify-between text-black">
           <span>Drive cost</span>
           <span className="tabular-nums font-medium">
-            -${s.timePenalty.toFixed(2)}
+            +${s.timePenalty.toFixed(2)}
           </span>
         </div>
         <div className="mt-2 flex justify-between border-t border-gray-100 pt-2 text-base font-bold text-[#1B4F72]">

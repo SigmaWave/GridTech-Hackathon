@@ -6,7 +6,7 @@ export function scoreCharger(
   driverLon,
   kwhNeeded,
   allChargers,
-  options = {}
+  options = {} 
 ) {
   const { driveMinutes: driveMinutesOverride, driveTimeSource = 'estimate' } =
     options;
