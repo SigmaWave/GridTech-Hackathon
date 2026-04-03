@@ -4,6 +4,10 @@ import { haversine } from './matching.js';
 const KWH_PER_100_MILES = 25;
 /** Marginal $/kWh for energy used while driving to the station. */
 const DRIVE_ELECTRICITY_USD_PER_KWH = 0.2;
+/** Average driving speed in mph (NYC realistic) */
+const AVG_SPEED_MPH = 15; // NYC average speed for short trips
+/** Road network factor (straight-line to actual road distance multiplier for NYC) */
+const ROAD_NETWORK_FACTOR = 1.3; // In cities, roads are ~30% longer than straight line
 
 const KM_TO_MI = 0.621371;
 
@@ -13,7 +17,6 @@ const KM_TO_MI = 0.621371;
 async function getOSRMDistance(lat1, lon1, lat2, lon2) {
   const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
   try {
-    console.log(`OSRM Request: ${url}`);
     const response = await fetch(url);
     const data = await response.json();
     
@@ -22,39 +25,38 @@ async function getOSRMDistance(lat1, lon1, lat2, lon2) {
       const minutes = data.routes[0].duration / 60;
       const miles = km * KM_TO_MI;
       
-      console.log(`OSRM Success: ${miles.toFixed(2)} miles, ${minutes.toFixed(0)} minutes`);
-      
       return {
         distanceMiles: miles,
         durationMinutes: minutes,
       };
     }
-    console.warn('OSRM returned no route:', data);
     return null;
   } catch (e) {
-    console.warn('OSRM fetch failed:', e);
+    console.warn('OSRM failed, using estimate:', e.message);
     return null;
   }
 }
 
 async function getDrivingMetrics(lat1, lon1, lat2, lon2) {
-  console.log(`Getting driving metrics from (${lat1},${lon1}) to (${lat2},${lon2})`);
-  
+  // Try OSRM first
   const osrm = await getOSRMDistance(lat1, lon1, lat2, lon2);
   if (osrm) {
-    console.log('Using OSRM real driving data');
     return { ...osrm, source: 'osrm' };
   }
   
-  // Fallback to haversine estimate
+  // Fallback: Use realistic road distance estimate
   const straightLineMiles = haversine(lat1, lon1, lat2, lon2);
-  // NYC average speed: ~10 mph for short trips
-  const estimatedMinutes = (straightLineMiles / 10) * 60;
   
-  console.log(`Using estimate: ${straightLineMiles.toFixed(2)} straight-line miles, ${estimatedMinutes.toFixed(0)} estimated minutes`);
+  // Apply road network factor (straight line × 1.3 for city driving)
+  const estimatedRoadMiles = straightLineMiles * ROAD_NETWORK_FACTOR;
+  
+  // Calculate time based on realistic average speed
+  const estimatedMinutes = (estimatedRoadMiles / AVG_SPEED_MPH) * 60;
+  
+  console.log(`OSRM fallback: ${straightLineMiles.toFixed(2)}mi straight → ${estimatedRoadMiles.toFixed(2)}mi road @ ${AVG_SPEED_MPH}mph = ${estimatedMinutes.toFixed(0)}min`);
   
   return {
-    distanceMiles: straightLineMiles,
+    distanceMiles: estimatedRoadMiles,
     durationMinutes: estimatedMinutes,
     source: 'estimate',
   };
@@ -77,7 +79,7 @@ export async function scoreCharger(
   if (driveMinutesOverride != null && driveMinutesOverride !== undefined) {
     driveMinutes = driveMinutesOverride;
     resolvedDriveTimeSource = driveTimeSource;
-    distanceMiles = (driveMinutes / 60) * 10;
+    distanceMiles = (driveMinutes / 60) * AVG_SPEED_MPH;
   } else {
     const m = await getDrivingMetrics(
       driverLat,
@@ -124,8 +126,8 @@ export async function scoreCharger(
     gridBonus: Math.round(gridBonus * 100) / 100,
     drActive,
     drBonus: Math.round(drBonus * 100) / 100,
-    distance_miles: Math.round(distanceMiles * 100) / 100,  // Changed to match screenshot
-    drive_minutes: Math.round(driveMinutes),  // Changed to match screenshot
+    distance: Math.round(distanceMiles * 100) / 100,
+    driveMinutes: Math.round(driveMinutes),
     driveTimeSource: resolvedDriveTimeSource,
     driveEnergyKwh: Math.round(driveEnergyKwh * 1000) / 1000,
     timePenalty: Math.round(timePenalty * 100) / 100,
@@ -133,8 +135,5 @@ export async function scoreCharger(
     totalEarnings: Math.round(totalEarnings * 100) / 100,
     netCost: Math.round(netCost * 100) / 100,
     score: Math.round(score * 100) / 100,
-    // Keep old property names for compatibility
-    distance: Math.round(distanceMiles * 100) / 100,
-    driveMinutes: Math.round(driveMinutes),
   };
 }
