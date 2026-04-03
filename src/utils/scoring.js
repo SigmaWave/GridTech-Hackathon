@@ -13,32 +13,49 @@ const KM_TO_MI = 0.621371;
 async function getOSRMDistance(lat1, lon1, lat2, lon2) {
   const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
   try {
+    console.log(`OSRM Request: ${url}`);
     const response = await fetch(url);
     const data = await response.json();
+    
     if (data.code === 'Ok' && data.routes?.[0]) {
       const km = data.routes[0].distance / 1000;
       const minutes = data.routes[0].duration / 60;
+      const miles = km * KM_TO_MI;
+      
+      console.log(`OSRM Success: ${miles.toFixed(2)} miles, ${minutes.toFixed(0)} minutes`);
+      
       return {
-        distanceMiles: km * KM_TO_MI,
+        distanceMiles: miles,
         durationMinutes: minutes,
       };
     }
+    console.warn('OSRM returned no route:', data);
     return null;
   } catch (e) {
-    console.warn('OSRM failed:', e);
+    console.warn('OSRM fetch failed:', e);
     return null;
   }
 }
 
 async function getDrivingMetrics(lat1, lon1, lat2, lon2) {
+  console.log(`Getting driving metrics from (${lat1},${lon1}) to (${lat2},${lon2})`);
+  
   const osrm = await getOSRMDistance(lat1, lon1, lat2, lon2);
   if (osrm) {
+    console.log('Using OSRM real driving data');
     return { ...osrm, source: 'osrm' };
   }
-  const miles = haversine(lat1, lon1, lat2, lon2);
+  
+  // Fallback to haversine estimate
+  const straightLineMiles = haversine(lat1, lon1, lat2, lon2);
+  // NYC average speed: ~10 mph for short trips
+  const estimatedMinutes = (straightLineMiles / 10) * 60;
+  
+  console.log(`Using estimate: ${straightLineMiles.toFixed(2)} straight-line miles, ${estimatedMinutes.toFixed(0)} estimated minutes`);
+  
   return {
-    distanceMiles: miles,
-    durationMinutes: (miles / 10) * 60,
+    distanceMiles: straightLineMiles,
+    durationMinutes: estimatedMinutes,
     source: 'estimate',
   };
 }
@@ -107,8 +124,8 @@ export async function scoreCharger(
     gridBonus: Math.round(gridBonus * 100) / 100,
     drActive,
     drBonus: Math.round(drBonus * 100) / 100,
-    distance: Math.round(distanceMiles * 100) / 100,
-    driveMinutes: Math.round(driveMinutes),
+    distance_miles: Math.round(distanceMiles * 100) / 100,  // Changed to match screenshot
+    drive_minutes: Math.round(driveMinutes),  // Changed to match screenshot
     driveTimeSource: resolvedDriveTimeSource,
     driveEnergyKwh: Math.round(driveEnergyKwh * 1000) / 1000,
     timePenalty: Math.round(timePenalty * 100) / 100,
@@ -116,5 +133,8 @@ export async function scoreCharger(
     totalEarnings: Math.round(totalEarnings * 100) / 100,
     netCost: Math.round(netCost * 100) / 100,
     score: Math.round(score * 100) / 100,
+    // Keep old property names for compatibility
+    distance: Math.round(distanceMiles * 100) / 100,
+    driveMinutes: Math.round(driveMinutes),
   };
 }
