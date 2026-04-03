@@ -82,10 +82,15 @@ export default function App() {
       if (kwhNeeded <= 0 || !chargers.length) return;
 
       const [lat, lon] = driverPosition;
+      
+      // Score all chargers asynchronously with OSRM and NYISO data
       const scored = await Promise.all(
-        chargers.map((c) => scoreCharger(c, lat, lon, kwhNeeded, chargers))
+        chargers.map((c) =>
+          scoreCharger(c, lat, lon, kwhNeeded, chargers)
+        )
       );
 
+      // Find best score (highest earnings - time penalty)
       let best = scored[0];
       let bestScore = best.score;
       for (const c of scored) {
@@ -95,12 +100,13 @@ export default function App() {
         }
       }
 
+      // Find closest by driving distance (km)
       let close = scored[0];
-      let minD = close.distance;
+      let minD = close.distance_km;
       for (const c of scored) {
-        if (c.distance < minD) {
+        if (c.distance_km < minD) {
           close = c;
-          minD = c.distance;
+          minD = c.distance_km;
         }
       }
 
