@@ -162,7 +162,21 @@ export default function MapView({
                 position={[c.lat + 0.00018, c.lon]}
                 icon={starIcon}
                 interactive={false}
-              />
+              >
+                <Tooltip
+                  permanent
+                  direction="top"
+                  offset={[0, -28]}
+                  opacity={1}
+                >
+                  <span className="block max-w-[140px] rounded border border-gray-200 bg-white px-2 py-1 text-center text-[10px] font-semibold leading-tight text-[#1B4F72] shadow-sm">
+                    Cheapest
+                    <span className="block font-normal text-gray-600">
+                      Lowest net cost
+                    </span>
+                  </span>
+                </Tooltip>
+              </Marker>
             ) : null}
           </LayerGroup>
         );

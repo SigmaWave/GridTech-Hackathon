@@ -90,28 +90,28 @@ export default function App() {
         )
       );
 
-      // Find best score (highest earnings - time penalty)
-      let best = scored[0];
-      let bestScore = best.score;
+      // Star / pick: lowest net cost (charging + drive − grid bonuses)
+      let cheapest = scored[0];
+      let minNet = cheapest.netCost;
       for (const c of scored) {
-        if (c.score > bestScore) {
-          best = c;
-          bestScore = c.score;
+        if (c.netCost < minNet) {
+          cheapest = c;
+          minNet = c.netCost;
         }
       }
 
-      // Find closest by driving distance (km)
+      // Closest by route/estimate distance (miles)
       let close = scored[0];
-      let minD = close.distance_km;
+      let minD = close.distance;
       for (const c of scored) {
-        if (c.distance_km < minD) {
+        if (c.distance < minD) {
           close = c;
-          minD = c.distance_km;
+          minD = c.distance;
         }
       }
 
       setScoredList(scored);
-      setRecommendedId(best.id);
+      setRecommendedId(cheapest.id);
       setClosestId(close.id);
       setSearchActive(true);
       setCompareIds([]);
