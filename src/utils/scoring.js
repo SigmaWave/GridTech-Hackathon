@@ -12,7 +12,7 @@ export function scoreCharger(charger, driverLat, driverLon, kwhNeeded, allCharge
     Math.min(100, ((congestion - minCong) / range) * 100)
   );
 
-  const gridBonus = Math.max(0, ((100 - gridStress) / 100) * 15);
+  const gridBonus = Math.max(0, ((100 - gridStress) / 100) * 5);
 
   const avgCong = allCong.reduce((a, b) => a + b, 0) / allCong.length;
   const drActive = avgCong > 10;
