@@ -1,61 +1,125 @@
 import chargersFallback from '../data/chargers_fallback.json';
 import nodeLocations from '../data/node_locations.json';
-
-const NREL_API_KEY = 'DEMO_KEY';
+import fleetCsv from '../../NYC_EV_Fleet_Station.csv?raw';
+import { haversine } from './matching.js';
 
 const NYISO_DIRECT = (dateStr) =>
   `https://mis.nyiso.com/public/csv/realtime/${dateStr}realtime_gen.csv`;
 
-export function parsePricing(pricingText, isDCFast) {
-  if (!pricingText) return isDCFast ? 0.35 : 0.2;
+function parseDelimitedCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let i = 0;
+  let inQuotes = false;
 
-  const kwhMatch = pricingText.match(/\$?([\d.]+)\s*\/\s*kWh/i);
-  if (kwhMatch) return parseFloat(kwhMatch[1]);
+  while (i < text.length) {
+    const c = text[i];
 
-  const centsMatch = pricingText.match(/([\d.]+)\s*¢?\s*\/\s*kWh/i);
-  if (centsMatch) return parseFloat(centsMatch[1]) / 100;
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i += 1;
+        continue;
+      }
+      field += c;
+      i += 1;
+      continue;
+    }
 
-  if (/free/i.test(pricingText)) return 0;
+    if (c === '"') {
+      inQuotes = true;
+      i += 1;
+      continue;
+    }
+    if (c === ',') {
+      row.push(field);
+      field = '';
+      i += 1;
+      continue;
+    }
+    if (c === '\r') {
+      i += 1;
+      continue;
+    }
+    if (c === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      i += 1;
+      continue;
+    }
+    field += c;
+    i += 1;
+  }
 
-  return isDCFast ? 0.35 : 0.2;
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
 }
 
-export async function fetchChargers(lat, lon, radiusMiles = 5) {
-  const params = new URLSearchParams({
-    api_key: NREL_API_KEY,
-    latitude: String(lat),
-    longitude: String(lon),
-    radius: String(radiusMiles),
-    fuel_type: 'ELEC',
-    ev_charging_level: 'dc_fast,2',
-    status: 'E',
-    access: 'public',
-    limit: '50',
+function chargerKindFromNycType(typeStr) {
+  const t = String(typeStr || '').toLowerCase();
+  if (/level\s*3|l3\b/.test(t) || (/fast/.test(t) && /charger/.test(t))) {
+    return { type: 'DC Fast', ports_l2: 0 };
+  }
+  return { type: 'Level 2', ports_dcfast: 0 };
+}
+
+function rowToStation(headers, values, rowIndex) {
+  const row = {};
+  headers.forEach((h, idx) => {
+    row[h] = values[idx] ?? '';
   });
 
-  const url = `https://developer.nrel.gov/api/alt-fuel-stations/v1/nearest.json?${params}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`NREL ${response.status}`);
-  const data = await response.json();
+  const lat = parseFloat(String(row.LATITUDE ?? '').replace(/"/g, '').trim());
+  const lon = parseFloat(String(row.LONGITUDE ?? '').replace(/"/g, '').trim());
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
-  if (!data.fuel_stations?.length) return [];
+  const plugs = parseInt(String(row['NO. OF PLUGS'] || '0'), 10) || 1;
+  const kind = chargerKindFromNycType(row['TYPE OF CHARGER']);
+  const isDC = kind.type === 'DC Fast';
 
-  return data.fuel_stations.map((station) => ({
-    id: station.id,
-    name: station.station_name,
-    address: station.street_address,
-    city: station.city,
-    lat: station.latitude,
-    lon: station.longitude,
-    type: station.ev_dc_fast_count > 0 ? 'DC Fast' : 'Level 2',
-    price_per_kwh: parsePricing(station.ev_pricing, station.ev_dc_fast_count > 0),
-    network: station.ev_network || 'Unknown',
-    ports_l2: station.ev_level2_evse_num || 0,
-    ports_dcfast: station.ev_dc_fast_count || 0,
-    connector_types: station.ev_connector_types || [],
-    access_time: station.access_days_time || '24 hours daily',
-    distance: station.distance,
-  }));
+  return {
+    id: `nyc-fleet-${rowIndex}`,
+    name: row['STATION NAME'] || `Station ${rowIndex}`,
+    address: row.ADDRESS || '',
+    city: row.CITY || '',
+    lat,
+    lon,
+    type: kind.type,
+    price_per_kwh: isDC ? 0.35 : 0.2,
+    network: row.AGENCY || 'NYC Fleet',
+    ports_l2: isDC ? 0 : plugs,
+    ports_dcfast: isDC ? plugs : 0,
+    connector_types: isDC ? ['CCS', 'CHADEMO'] : ['J1772'],
+    access_time: row['PUBLIC CHARGER?'] || 'Fleet (see agency)',
+  };
+}
+
+export function parseFleetStationCsv(text) {
+  const table = parseDelimitedCsv(text.trim());
+  if (table.length < 2) return [];
+
+  const headers = table[0].map((h) => String(h).trim().replace(/^"|"$/g, ''));
+  const stations = [];
+
+  for (let r = 1; r < table.length; r += 1) {
+    const values = table[r].map((c) => String(c).trim().replace(/^"|"$/g, ''));
+    const station = rowToStation(headers, values, r);
+    if (station) stations.push(station);
+  }
+
+  return stations;
 }
 
 function parseNYISOCSV(csvText) {
@@ -173,11 +237,20 @@ export async function getNodesWithLocations() {
 
 export async function getChargers(lat, lon, radiusMiles = 8) {
   try {
-    const stations = await fetchChargers(lat, lon, radiusMiles);
-    if (!stations?.length) throw new Error('No chargers from NREL');
-    return stations;
+    const all = parseFleetStationCsv(fleetCsv);
+    const near = all
+      .map((s) => ({
+        ...s,
+        distance: haversine(lat, lon, s.lat, s.lon),
+      }))
+      .filter((s) => s.distance <= radiusMiles)
+      .sort((a, b) => a.distance - b.distance);
+
+    if (near.length) return near;
+    console.warn('No NYC fleet stations within radius, using fallback data');
+    return JSON.parse(JSON.stringify(chargersFallback));
   } catch (error) {
-    console.warn('NREL API failed, using fallback data', error);
+    console.warn('NYC fleet CSV failed, using fallback data', error);
     return JSON.parse(JSON.stringify(chargersFallback));
   }
 }

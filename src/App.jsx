@@ -13,7 +13,7 @@ const CENTER = { lat: 40.758, lon: -73.9855 };
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState(
-    'Fetching EV charger locations...'
+    'Loading NYC fleet charging stations...'
   );
   const [chargers, setChargers] = useState([]);
   const [gridData, setGridData] = useState(null);
@@ -36,7 +36,7 @@ export default function App() {
 
     async function init() {
       setLoading(true);
-      setLoadingMessage('Fetching EV charger locations...');
+      setLoadingMessage('Loading NYC fleet charging stations...');
 
       const list = await getChargers(CENTER.lat, CENTER.lon, 8);
 
